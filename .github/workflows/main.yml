@@ -1,0 +1,63 @@
+name: Build Android APK
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Unzip Project
+        run: |
+          ZIP_FILE=$(find . -name "*.zip" | head -n 1)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Unzipping $ZIP_FILE..."
+            unzip "$ZIP_FILE" -d extracted_project
+            REAL_DIR=$(find ./extracted_project -name package.json -not -path "*/node_modules/*" | head -n 1 | xargs dirname)
+            echo "Project found at: $REAL_DIR"
+            echo "APP_DIR=$REAL_DIR" >> $GITHUB_ENV
+          else
+            APP_DIR=$(find . -name package.json -not -path "*/node_modules/*" | head -n 1 | xargs dirname)
+            if [ -z "$APP_DIR" ]; then
+                echo "ERROR: Neither ZIP nor package.json found!"
+                ls -R
+                exit 1
+            fi
+            echo "APP_DIR=$APP_DIR" >> $GITHUB_ENV
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Install Dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          npm install --legacy-peer-deps --no-package-lock
+          npm install react-is --save-dev --legacy-peer-deps --no-package-lock
+
+      - name: Build Web App
+        working-directory: ${{ env.APP_DIR }}
+        run: npm run build
+
+      - name: Setup Capacitor and Android
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          npm install @capacitor/android @capacitor/core @capacitor/cli
+          if [ ! -f "capacitor.config.json" ]; then
+            echo '{"appId": "com.dr.avinalli.app", "appName": "PCOS Tracker", "webDir": "dist"}' > capacitor.config.json
+          fi
+          npx cap add android || true
+          npx cap sync
+
+      - name: Patch Gradle for Kotlin Duplicates
+        working-directory: ${{ env.APP_DIR }}
+        run: |
